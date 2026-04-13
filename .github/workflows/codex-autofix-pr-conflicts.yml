@@ -1,0 +1,89 @@
+name: Codex Auto-Fix PR Conflicts
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to update.
+        required: true
+        type: number
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Load PR metadata
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const prNumber = Number('${{ inputs.pr_number }}');
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            core.setOutput('number', String(pr.number));
+            core.setOutput('base_ref', pr.base.ref);
+            core.setOutput('base_repo', pr.base.repo.full_name);
+            core.setOutput('head_ref', pr.head.ref);
+            core.setOutput('head_repo', pr.head.repo.full_name);
+
+            if (pr.head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+              core.setFailed('This workflow can only push to branches in the same repository.');
+            }
+
+      - name: Checkout PR branch
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ steps.pr.outputs.head_repo }}
+          ref: ${{ steps.pr.outputs.head_ref }}
+          fetch-depth: 0
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Prepare merge and capture conflicts
+        id: prepare
+        run: |
+          .github/scripts/autofix_pr_conflicts.sh prepare origin "${{ steps.pr.outputs.base_ref }}"
+
+      - name: Run Codex to resolve conflicts
+        if: steps.prepare.outputs.needs_codex == 'true'
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: workspace-write
+          prompt: |
+            You are resolving merge conflicts for PR #${{ steps.pr.outputs.number }}.
+
+            The branch already has a conflicted merge in progress with `${{ steps.pr.outputs.base_ref }}`.
+            Resolve every file currently marked as conflicted.
+            Conflicted files:
+            ${{ steps.prepare.outputs.conflicted_files }}
+
+            Requirements:
+            1. Keep the PR's intent intact.
+            2. Keep all tests/build configs valid.
+            3. Remove conflict markers.
+            4. Do not change unrelated files.
+
+            After editing files, run:
+            - git status --short
+            - git diff --name-only --diff-filter=U
+
+      - name: Commit and push resolved files
+        if: steps.prepare.outputs.needs_codex == 'true'
+        run: |
+          .github/scripts/autofix_pr_conflicts.sh finalize "${{ steps.pr.outputs.head_ref }}"
+
+      - name: Report no-op run
+        if: steps.prepare.outputs.needs_codex != 'true'
+        run: echo "PR #${{ steps.pr.outputs.number }} has no merge conflicts."
