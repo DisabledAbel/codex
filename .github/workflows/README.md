@@ -34,4 +34,4 @@ The workflows in this directory are split so that pull requests get fast, review
 
 ## Manual Utilities
 
-- `codex-autofix-pr-conflicts.yml` is a manually triggered helper that checks out a PR branch, merges the base branch, and asks Codex to resolve merge conflicts before pushing the result back to the PR branch.
+- `codex-autofix-pr-conflicts.yml` can be run manually, and it also auto-runs on PR updates when the PR has a `codex` label. It checks out a PR branch, merges the base branch, and asks Codex to resolve merge conflicts before pushing the result back to the PR branch.

@@ -7,9 +7,17 @@ on:
         description: Pull request number to update.
         required: true
         type: number
+  pull_request_target:
+    types:
+      - labeled
+      - synchronize
+      - reopened
 
 jobs:
   autofix:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'codex')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -21,7 +29,9 @@ jobs:
         with:
           github-token: ${{ github.token }}
           script: |
-            const prNumber = Number('${{ inputs.pr_number }}');
+            const prNumber = context.eventName === 'workflow_dispatch'
+              ? Number('${{ inputs.pr_number }}')
+              : Number(context.payload.pull_request.number);
             const { data: pr } = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -33,10 +43,6 @@ jobs:
             core.setOutput('base_repo', pr.base.repo.full_name);
             core.setOutput('head_ref', pr.head.ref);
             core.setOutput('head_repo', pr.head.repo.full_name);
-
-            if (pr.head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
-              core.setFailed('This workflow can only push to branches in the same repository.');
-            }
 
       - name: Checkout PR branch
         uses: actions/checkout@v5
